@@ -560,7 +560,6 @@ async def process_answer(message: types.Message, answer_text: str):
         "last_score": score
     }
     session.close()
-
 async def process_case_answer(message: types.Message, answer_text: str):
     user_id = message.from_user.id
     state = user_states[user_id]
@@ -604,7 +603,7 @@ async def process_case_answer(message: types.Message, answer_text: str):
         result = {"score": 0, "verdict": "Ошибка проверки", "missing": [], "mistakes": [str(e)], "advice": "Попробуй позже.", "full_answer": ""}
     
     score = result.get("score", 0)
-    emoji = {"Найс": "✅", "Соу Соу": "⚠️", "Ю АР ЩТЮПИД!!!": "❌"}.get(result['verdict'], "📝")
+    emoji = {"Найс": "✅", "Соу соу": "⚠️", "Ю АР ЩТЮПИД!!!": "❌"}.get(result['verdict'], "📝")
     text = f"{emoji} *Оценка кейса: {score}/10*\n⚖️ *Вердикт:* {result['verdict']}\n\n"
     
     if result.get("missing"):
@@ -619,6 +618,7 @@ async def process_case_answer(message: types.Message, answer_text: str):
     await check_msg.edit_text(text, parse_mode="Markdown")
     await message.answer("Главное меню:", reply_markup=main_menu())
     user_states[user_id] = {"awaiting": None, "last_card_id": state.get("last_card_id")}
+    
 @dp.message(F.voice | F.audio)
 async def handle_voice_answer(message: types.Message):
     user_id = message.from_user.id
@@ -640,7 +640,8 @@ async def handle_voice_answer(message: types.Message):
         os.remove(file_path)
         
         await msg.edit_text(f"📝 *Кусь за бочок:*\n_{transcript}_", parse_mode="Markdown")
-                if user_states[user_id].get("awaiting") in ("answer", "clarification"):
+        
+        if user_states[user_id].get("awaiting") in ("answer", "clarification"):
             await process_answer(message, transcript)
         elif user_states[user_id].get("awaiting") == "case_answer":
             await process_case_answer(message, transcript)
@@ -682,14 +683,7 @@ async def handle_text_answer(message: types.Message):
         return
     
     state = user_states[user_id]
-     if state.get("awaiting") == "case_answer":
-        await process_case_answer(message, message.text)
-        return
     
-    if state.get("awaiting") in ("answer", "clarification"):
-        await process_answer(message, message.text)
-        return
-        
     if state.get("awaiting") == "select_card":
         try:
             card_id = int(message.text)
@@ -715,6 +709,10 @@ async def handle_text_answer(message: types.Message):
         text = f"📌 *Билет #{card.id} | {card.category}*\n\n🎯 *Вопрос:*\n{card.question}\n\n🎙️ Ответь голосом или текстом:"
         await message.answer(text, parse_mode="Markdown")
         session.close()
+        return
+    
+    if state.get("awaiting") == "case_answer":
+        await process_case_answer(message, message.text)
         return
     
     if state.get("awaiting") in ("answer", "clarification"):
