@@ -8,6 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from openai import AsyncOpenAI
 from sqlalchemy import func
+from aiohttp import web
 
 from config import settings
 from models import Session, Card, User
@@ -299,9 +300,25 @@ async def daily_reminder():
         session.close()
         await asyncio.sleep(60)
 
+async def health_check(request):
+    return web.Response(text="Bot is running!")
+
 async def main():
+    # Веб-сервер для Render (чтобы он видел открытый порт)
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000)))
+    await site.start()
+    
+    # Запускаем бота и напоминания
     asyncio.create_task(daily_reminder())
-    await dp.start_polling(bot)
+    asyncio.create_task(dp.start_polling(bot))
+    
+    # Держим main живым
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
