@@ -199,7 +199,14 @@ async def generate_connections(question: str, reference: str, card_id: int) -> s
         return "Не удалось найти связи."
 
 async def generate_case(question: str, reference: str) -> str:
-    prompt = f"Создай короткий практический кейс (1 абзац) на основе экзаменационного билета. Вопрос: {question[:120]}. Контекст: {reference[:250]}."
+    prompt = f"""Создай короткий практический кейс (1 абзац) на основе экзаменационного билета. Затем задай 1 конкретный вопрос по этому кейсу, на который студент должен ответить устно.
+
+Вопрос билета: {question[:120]}
+Контекст: {reference[:250]}
+
+Формат:
+📋 КЕЙС: <текст кейса>
+❓ ВОПРОС: <вопрос для ответа>"""
     try:
         response = await client.chat.completions.create(
             model=settings.GPT_MODEL,
@@ -208,7 +215,7 @@ async def generate_case(question: str, reference: str) -> str:
         )
         return response.choices[0].message.content
     except:
-        return "Не удалось сгенерировать кейс."
+        return "📋 КЕЙС: Не удалось сгенерировать кейс.\n❓ ВОПРОС: Попробуй позже."
 
 async def transcribe_voice(voice_file_path: str) -> str:
     with open(voice_file_path, "rb") as audio_file:
@@ -460,13 +467,23 @@ async def handle_material(message: types.Message):
     
     elif message.text == "🧩 Кейс":
         if card.case_text:
-            text = f"🧩 *Кейс для билета #{card.id}:*\n{card.case_text}"
+            case_text = card.case_text
         else:
             await message.answer("🧩 Генерирую кейс...")
-            case = await generate_case(card.question, card.reference_answer)
-            card.case_text = case
+            case_text = await generate_case(card.question, card.reference_answer)
+            card.case_text = case_text
             session.commit()
-            text = f"🧩 *Кейс:*\n{case}"
+        
+        await message.answer(f"🧩 *Кейс для билета #{card.id}:*\n{case_text}", parse_mode="Markdown")
+        await message.answer("📝 *Напиши или скажи голосом свой ответ на вопрос кейса:*", parse_mode="Markdown")
+        
+        user_states[user_id] = {
+            "awaiting": "case_answer",
+            "case_prompt": case_text,
+            "last_card_id": card.id
+        }
+        session.close()
+        return  # ВАЖНО: выходим, чтобы не сработал общий код в конце функции
     
     await message.answer(text, parse_mode="Markdown", reply_markup=main_menu())
     session.close()
@@ -544,10 +561,68 @@ async def process_answer(message: types.Message, answer_text: str):
     }
     session.close()
 
+async def process_case_answer(message: types.Message, answer_text: str):
+    user_id = message.from_user.id
+    state = user_states[user_id]
+    case_prompt = state["case_prompt"]
+    
+    check_msg = await message.answer("🧠 *Проверяю ответ на кейс...*", parse_mode="Markdown")
+    
+    prompt = f"""Ты строгий экзаменатор по магистерской программе «Безопасность систем ИИ». Студенту дали кейс с вопросом. Оцени его устный ответ строго.
+
+КЕЙС И ВОПРОС:
+{case_prompt}
+
+ОТВЕТ СТУДЕНТА:
+{answer_text}
+
+ПРАВИЛА:
+1. Оцени от 0 до 10. Если ответ общий, не по кейсу или вода — снижай до 3–4.
+2. Укажи конкретные недостатки (missing) и ошибки (mistakes) — только реальные термины, никаких "пункт 1".
+3. Дай краткий совет, как улучшить ответ.
+4. Напиши эталонный развёрнутый ответ на вопрос кейса (полный, структурированный).
+
+Ответь СТРОГО в JSON:
+{{
+  "score": 7,
+  "verdict": "Частично",
+  "missing": [],
+  "mistakes": [],
+  "advice": "краткий совет",
+  "full_answer": "Эталонный ответ на кейс..."
+}}"""
+    try:
+        response = await client.chat.completions.create(
+            model=settings.GPT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
+        import json
+        result = json.loads(response.choices[0].message.content)
+    except Exception as e:
+        result = {"score": 0, "verdict": "Ошибка проверки", "missing": [], "mistakes": [str(e)], "advice": "Попробуй позже.", "full_answer": ""}
+    
+    score = result.get("score", 0)
+    emoji = {"Найс": "✅", "Соу Соу": "⚠️", "Ю АР ЩТЮПИД!!!": "❌"}.get(result['verdict'], "📝")
+    text = f"{emoji} *Оценка кейса: {score}/10*\n⚖️ *Вердикт:* {result['verdict']}\n\n"
+    
+    if result.get("missing"):
+        text += "❗ *Чего не хватило:*\n" + "\n".join(f"• {m}" for m in result["missing"]) + "\n\n"
+    if result.get("mistakes"):
+        text += "❌ *Ошибки:*\n" + "\n".join(f"• {m}" for m in result["mistakes"]) + "\n\n"
+    if result.get("full_answer"):
+        text += f"📋 *Эталонный ответ на кейс:*\n_{result['full_answer']}_\n\n"
+    if result.get("advice"):
+        text += f"💡 *Совет:* {result['advice']}\n\n"
+    
+    await check_msg.edit_text(text, parse_mode="Markdown")
+    await message.answer("Главное меню:", reply_markup=main_menu())
+    user_states[user_id] = {"awaiting": None, "last_card_id": state.get("last_card_id")}
 @dp.message(F.voice | F.audio)
 async def handle_voice_answer(message: types.Message):
     user_id = message.from_user.id
-    if user_id not in user_states or user_states[user_id].get("awaiting") not in ("answer", "clarification"):
+    if user_id not in user_states or user_states[user_id].get("awaiting") not in ("answer", "clarification", "case_answer"):
         return
     
     voice = message.voice or message.audio
@@ -565,7 +640,10 @@ async def handle_voice_answer(message: types.Message):
         os.remove(file_path)
         
         await msg.edit_text(f"📝 *Кусь за бочок:*\n_{transcript}_", parse_mode="Markdown")
-        await process_answer(message, transcript)
+                if user_states[user_id].get("awaiting") in ("answer", "clarification"):
+            await process_answer(message, transcript)
+        elif user_states[user_id].get("awaiting") == "case_answer":
+            await process_case_answer(message, transcript)
     except Exception as e:
         await msg.edit_text(f"❌ Ошибка: {e}\nПопробуй текстом.")
         if os.path.exists(file_path):
@@ -604,7 +682,14 @@ async def handle_text_answer(message: types.Message):
         return
     
     state = user_states[user_id]
+     if state.get("awaiting") == "case_answer":
+        await process_case_answer(message, message.text)
+        return
     
+    if state.get("awaiting") in ("answer", "clarification"):
+        await process_answer(message, message.text)
+        return
+        
     if state.get("awaiting") == "select_card":
         try:
             card_id = int(message.text)
