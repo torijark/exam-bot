@@ -69,31 +69,37 @@ def update_card_anki(card: Card, quality: str):
     card.due_date = datetime.utcnow() + timedelta(days=card.interval)
     card.status = "review"
 
-async def check_with_gpt(question: str, reference: str, student_answer: str):
-    prompt = f"""Ты строгий, но справедливый экзаменатор по магистерской программе «Безопасность систем ИИ».
+async def check_with_gpt(question: str, reference: str, student_answer: str, attempts: int, history: list):
+    history_text = ""
+    for i, h in enumerate(history[:-1], 1):
+        history_text += f"\nПопытка {i}: {h}\n"
+    
+    prompt = f"""Ты строгий, но справедливый экзаменатор по магистерской программе «Безопасность систем ИИ». Ты проводишь устный экзамен и помогаешь студенту дойти до правильного ответа, а не просто ставишь оценку.
 
 ВОПРОС: {question}
 
-ЭТАЛОННЫЙ ОТВЕТ:
+ЭТАЛОННЫЙ ОТВЕТ (что ожидает комиссия):
 {reference}
 
-ОТВЕТ СТУДЕНТА:
+ИСТОРИЯ ОТВЕТОВ СТУДЕНТА:
+{history_text if history_text else "Пока нет предыдущих ответов."}
+ТЕКУЩИЙ ОТВЕТ (попытка {attempts + 1}):
 {student_answer}
 
-Задание:
-1. Оцени ответ по смыслу от 1 до 10.
-2. Вердикт: Зачтено (7-10) / Частично (4-6) / Незачтено (1-3).
-3. Перечисли пропущенные ключевые пункты.
-4. Укажи ошибки.
-5. Дай конкретный совет.
+ПРАВИЛА ПРОВЕРКИ:
+1. Если это 1-я или 2-я попытка И ответ неполный (оценка < 7) — задай 1-2 КОРОТКИХ наводящих вопроса. Не давай полный разбор! Вердикт: "Нужно уточнить". clarifying_questions должен содержать вопросы.
+2. Если это 3-я попытка (независимо от качества) ИЛИ ответ сразу хороший (оценка >= 7) — дай ФИНАЛЬНУЮ развёрнутую оценку: перечисли пропущенное, ошибки, и дай совет "как лучше ответить на экзамене". clarifying_questions пустой.
+3. Не задавай наводящие вопросы, если ответ уже достаточно полный (>= 7 баллов).
+4. Оценивай по смыслу, не дословно.
 
 Ответь СТРОГО в JSON:
 {{
   "score": 8,
   "verdict": "Зачтено",
+  "clarifying_questions": [],
   "missing": ["пункт 1"],
   "mistakes": ["ошибка 1"],
-  "advice": "совет"
+  "advice": "совет по экзамену"
 }}"""
     try:
         response = await client.chat.completions.create(
@@ -105,7 +111,14 @@ async def check_with_gpt(question: str, reference: str, student_answer: str):
         import json
         return json.loads(response.choices[0].message.content)
     except Exception as e:
-        return {"score": 0, "verdict": "Ошибка проверки", "missing": [], "mistakes": [str(e)], "advice": "Попробуй позже."}
+        return {
+            "score": 0,
+            "verdict": "Ошибка проверки",
+            "clarifying_questions": [],
+            "missing": [],
+            "mistakes": [str(e)],
+            "advice": "Попробуй позже."
+        }
 
 async def transcribe_voice(voice_file_path: str) -> str:
     with open(voice_file_path, "rb") as audio_file:
@@ -132,7 +145,9 @@ async def cmd_start(message: types.Message):
         await message.answer(
             "👋 Привет! Я твой экзаменационный бот.\n\n"
             "🎙️ Отвечай голосом или текстом — я всё проверю.\n"
-            "📚 Каждый день буду присылать билеты.\n\nВыбери действие 👇",
+            "📚 Если ответ неполный, я задам наводящие вопросы.\n"
+            "Только после 2–3 попыток дам финальную оценку.\n\n"
+            "Выбери действие 👇",
             reply_markup=main_menu()
         )
     else:
@@ -155,7 +170,11 @@ async def new_question(message: types.Message):
         session.close()
         return
     
-    user_states[message.from_user.id] = {"card_id": card.id, "awaiting": "answer"}
+    user_states[message.from_user.id] = {
+        "card_id": card.id,
+        "awaiting": "answer",
+        "answers_history": []
+    }
     text = f"📌 *Билет #{card.id} | {card.category}*\n\n🎯 *Вопрос:*\n{card.question}\n\n🎙️ Ответь голосом или текстом:"
     await message.answer(text, parse_mode="Markdown")
     session.close()
@@ -173,7 +192,11 @@ async def review_mode(message: types.Message):
         session.close()
         return
     
-    user_states[message.from_user.id] = {"card_id": card.id, "awaiting": "answer"}
+    user_states[message.from_user.id] = {
+        "card_id": card.id,
+        "awaiting": "answer",
+        "answers_history": []
+    }
     text = f"🔁 *Повторение | {card.category}*\n📅 Было на: {card.due_date.strftime('%d.%m')}\n\n🎯 *Вопрос:*\n{card.question}\n\n🎙️ Ответь голосом или текстом:"
     await message.answer(text, parse_mode="Markdown")
     session.close()
@@ -200,28 +223,56 @@ async def process_answer(message: types.Message, answer_text: str):
     card_id = user_states[user_id]["card_id"]
     card = session.query(Card).get(card_id)
     
-    check_msg = await message.answer("🧠 *Проверяю ответ...*", parse_mode="Markdown")
-    result = await check_with_gpt(card.question, card.reference_answer, answer_text)
+    # Сохраняем историю
+    user_states[user_id]["answers_history"].append(answer_text)
+    attempts = len(user_states[user_id]["answers_history"]) - 1  # 0-based
     
+    check_msg = await message.answer("🧠 *Думаю...*", parse_mode="Markdown")
+    
+    history = user_states[user_id]["answers_history"]
+    result = await check_with_gpt(card.question, card.reference_answer, answer_text, attempts, history)
+    
+    # Если нужно уточнить и ещё есть попытки (0 или 1, т.е. 1-я или 2-я попытка)
+    if result.get("verdict") == "Нужно уточнить" and attempts < 2:
+        questions = result.get("clarifying_questions", [])
+        text = f"⚠️ *Пока {result['score']}/10 — давай уточним*\n\n"
+        if questions:
+            text += "🎯 *Подумай над этим:*\n"
+            for q in questions:
+                text += f"• {q}\n"
+        text += "\n📝 Напиши дополнение или уточнение:"
+        
+        await check_msg.edit_text(text, parse_mode="Markdown")
+        user_states[user_id]["awaiting"] = "clarification"
+        session.close()
+        return
+    
+    # Иначе — финальная оценка
     emoji = {"Зачтено": "✅", "Частично": "⚠️", "Незачтено": "❌"}.get(result['verdict'], "📝")
-    text = f"{emoji} *Оценка: {result['score']}/10*\n⚖️ *Вердикт:* {result['verdict']}\n\n"
+    text = f"{emoji} *Финальная оценка: {result['score']}/10*\n⚖️ *Вердикт:* {result['verdict']}\n\n"
+    
     if result.get("missing"):
-        text += "❗ *Пропущено:*\n" + "\n".join(f"• {m}" for m in result["missing"]) + "\n\n"
+        text += "❗ *Что стоит добавить:*\n" + "\n".join(f"• {m}" for m in result["missing"]) + "\n\n"
     if result.get("mistakes"):
         text += "❌ *Ошибки:*\n" + "\n".join(f"• {m}" for m in result["mistakes"]) + "\n\n"
     if result.get("advice"):
-        text += f"💡 *Совет:* {result['advice']}\n\n"
-    text += "Как оценишь сложность?"
+        text += f"💡 *Как ответить на экзамене:*\n_{result['advice']}_\n\n"
+    
+    text += "Как оценишь сложность ответа?"
     
     await check_msg.edit_text(text, parse_mode="Markdown")
-    await message.answer("Выбери кнопку:", reply_markup=anki_buttons())
-    user_states[user_id] = {"card_id": card.id, "awaiting": "anki_rating"}
+    await message.answer("Выбери кнопку для повторения:", reply_markup=anki_buttons())
+    user_states[user_id] = {
+        "card_id": card.id,
+        "awaiting": "anki_rating",
+        "answers_history": user_states[user_id].get("answers_history", [])
+    }
     session.close()
 
 @dp.message(F.voice | F.audio)
 async def handle_voice_answer(message: types.Message):
     user_id = message.from_user.id
-    if user_id not in user_states or user_states[user_id].get("awaiting") != "answer":
+    if user_id not in user_states or user_states[user_id].get("awaiting") not in ("answer", "clarification"):
         return
     
     voice = message.voice or message.audio
@@ -271,9 +322,13 @@ async def handle_anki(message: types.Message):
 @dp.message(F.text)
 async def handle_text_answer(message: types.Message):
     user_id = message.from_user.id
-    if user_id not in user_states or user_states[user_id].get("awaiting") != "answer":
+    if user_id not in user_states:
         return
-    await process_answer(message, message.text)
+    state = user_states[user_id]
+    if state.get("awaiting") in ("answer", "clarification"):
+        await process_answer(message, message.text)
+    elif state.get("awaiting") == "anki_rating":
+        await message.answer("Выбери кнопку сложности ↓", reply_markup=anki_buttons())
 
 async def daily_reminder():
     while True:
