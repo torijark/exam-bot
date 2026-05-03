@@ -135,14 +135,27 @@ async def check_with_gpt(question: str, reference: str, student_answer: str, att
 5. На 3-й попытке ИЛИ если оценка ≥ 8 — дай ФИНАЛЬНУЮ оценку. В поле full_answer напиши ПОЛНЫЙ, РАЗВЁРНУТЫЙ, СТРУКТУРИРОВАННЫЙ ответ, как на экзамене: вступление, основная часть с пунктами, заключение, примеры. Не сокращай.
 6. В полях missing и mistakes указывай ТОЛЬКО конкретные термины и факты из эталонного ответа. НИКОГДА не пиши placeholder'ы типа "пункт 1", "ошибка 1", "недостаточная детализация". Вместо этого перечисляй реальные недостающие понятия: например, «Не названы уровни полномочий: административный, системный, физический» или «Пропущена классификация по каналам утечки: электромагнитный, акустический, оптический».
 
-Ответь СТРОГО в JSON:
+Ответь СТРОГО в JSON.
+
+Если это 1-я или 2-я попытка и оценка < 8:
 {{
   "score": 4,
-  "verdict": "Незачтено",
-  "clarifying_questions": [],
+  "verdict": "Нужно уточнить",
+  "clarifying_questions": ["Что вы можете добавить про ...?", "Как связаны понятия ... и ...?"],
   "missing": ["конкретный недостающий пункт из эталона"],
   "mistakes": ["конкретная ошибка студента"],
-  "advice": "краткий жёсткий совет, что именно выучить",
+  "advice": "",
+  "full_answer": ""
+}}
+
+Если это финальная оценка (3-я попытка или оценка >= 8):
+{{
+  "score": 8,
+  "verdict": "Зачтено",
+  "clarifying_questions": [],
+  "missing": [],
+  "mistakes": [],
+  "advice": "краткий жёсткий совет",
   "full_answer": "Полный развёрнутый ответ на экзамен: ..."
 }}"""
     try:
@@ -475,15 +488,19 @@ async def process_answer(message: types.Message, answer_text: str):
     score = result.get("score", 0)
     
     # --- УТОЧНЕНИЕ (1-я или 2-я попытка, оценка < 8) ---
-    if result.get("verdict") == "Нужно уточнить" and attempts < 2:
+    is_clarification = (result.get("verdict") == "Нужно уточнить") or (attempts < 2 and score < 8)
+    
+    if is_clarification and attempts < 2:
         questions = result.get("clarifying_questions", [])
         text = f"⚠️ *Пока {score}/10 — давай уточним*\n\n"
         if questions:
             text += "🎯 *Подумай над этим:*\n"
             for q in questions:
                 text += f"• {q}\n"
+        else:
+            text += "🎯 *Попробуй раскрыть ответ подробнее.*\n"
         
-        # Показываем полный эталон из базы сразу, чтобы студент видел, к чему стремиться
+        # Показываем полный эталон из базы сразу
         text += f"\n📋 *Эталонный ответ из базы:*\n_{card.reference_answer}_\n\n"
         text += "📝 Напиши дополнение или уточнение:"
         
@@ -498,10 +515,10 @@ async def process_answer(message: types.Message, answer_text: str):
         card.full_answer = result["full_answer"]
         session.commit()
     
-    # Берём лучший эталон: сгенерированный GPT или оригинал из JSON как fallback
+    # Берём лучший эталон: сгенерированный GPT или оригинал из JSON
     saved_full = card.full_answer or card.reference_answer
     
-    emoji = {"Найс": "✅", "Соу соу": "⚠️", "Ю АР ШТЮПИД": "❌"}.get(result['verdict'], "📝")
+    emoji = {"Найс": "✅", "Соу соу": "⚠️", "Ю АР ЩТЮПИД!!!": "❌"}.get(result['verdict'], "📝")
     text = f"{emoji} *Финальная оценка: {score}/10*\n⚖️ *Вердикт:* {result['verdict']}\n\n"
     
     if result.get("missing"):
