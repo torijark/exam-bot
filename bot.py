@@ -500,8 +500,6 @@ async def process_answer(message: types.Message, answer_text: str):
         else:
             text += "🎯 *Попробуй раскрыть ответ подробнее.*\n"
         
-        # Показываем полный эталон из базы сразу
-        text += f"\n📋 *Эталонный ответ из базы:*\n_{card.reference_answer}_\n\n"
         text += "📝 Напиши дополнение или уточнение:"
         
         await check_msg.edit_text(text, parse_mode="Markdown")
