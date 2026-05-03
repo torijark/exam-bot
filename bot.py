@@ -592,7 +592,7 @@ async def handle_text_answer(message: types.Message):
         await process_answer(message, message.text)
         return
     
-if state.get("awaiting") == "anki_rating":
+    if state.get("awaiting") == "anki_rating":
         await message.answer("Выбери кнопку сложности ↓", reply_markup=anki_buttons())
         return
     
