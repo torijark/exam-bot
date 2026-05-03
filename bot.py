@@ -397,7 +397,7 @@ async def handle_test_answer(message: types.Message):
     
     await message.answer(text, parse_mode="Markdown")
     await message.answer("Ещё тест или в меню?", reply_markup=main_menu())
-    del user_states[user_id]
+    user_states[user_id] = {"awaiting": "after_test"}
 
 @dp.message(F.text.in_(["🧠 Мнемоника", "🔗 Связи", "🧩 Кейс"]))
 async def handle_material(message: types.Message):
@@ -592,8 +592,16 @@ async def handle_text_answer(message: types.Message):
         await process_answer(message, message.text)
         return
     
-    if state.get("awaiting") == "anki_rating":
+if state.get("awaiting") == "anki_rating":
         await message.answer("Выбери кнопку сложности ↓", reply_markup=anki_buttons())
+        return
+    
+    if state.get("awaiting") == "after_test":
+        text = message.text.lower()
+        if "тест" in text or "test" in text:
+            await start_test(message)
+        else:
+            await back_to_menu(message)
         return
 
 async def daily_reminder():
