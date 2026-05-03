@@ -194,7 +194,7 @@ async def show_stats(message: types.Message):
     await message.answer(text, parse_mode="Markdown", reply_markup=main_menu())
     session.close()
 
-async def process_answer(message: types.Message, answer_text: str, skip_send_question: bool = False):
+async def process_answer(message: types.Message, answer_text: str):
     user_id = message.from_user.id
     session = Session()
     card_id = user_states[user_id]["card_id"]
@@ -218,13 +218,6 @@ async def process_answer(message: types.Message, answer_text: str, skip_send_que
     user_states[user_id] = {"card_id": card.id, "awaiting": "anki_rating"}
     session.close()
 
-@dp.message(F.text)
-async def handle_text_answer(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in user_states or user_states[user_id].get("awaiting") != "answer":
-        return
-    await process_answer(message, message.text)
-
 @dp.message(F.voice | F.audio)
 async def handle_voice_answer(message: types.Message):
     user_id = message.from_user.id
@@ -246,7 +239,7 @@ async def handle_voice_answer(message: types.Message):
         os.remove(file_path)
         
         await msg.edit_text(f"📝 *Распознано:*\n_{transcript}_", parse_mode="Markdown")
-        await process_answer(message, transcript, skip_send_question=True)
+        await process_answer(message, transcript)
     except Exception as e:
         await msg.edit_text(f"❌ Ошибка: {e}\nПопробуй текстом.")
         if os.path.exists(file_path):
@@ -274,6 +267,13 @@ async def handle_anki(message: types.Message):
     )
     del user_states[user_id]
     session.close()
+
+@dp.message(F.text)
+async def handle_text_answer(message: types.Message):
+    user_id = message.from_user.id
+    if user_id not in user_states or user_states[user_id].get("awaiting") != "answer":
+        return
+    await process_answer(message, message.text)
 
 async def daily_reminder():
     while True:
@@ -303,22 +303,18 @@ async def daily_reminder():
 async def health_check(request):
     return web.Response(text="Bot is running!")
 
-async def main():
-    # Веб-сервер для Render (чтобы он видел открытый порт)
+async def start_web_server():
     app = web.Application()
     app.router.add_get('/', health_check)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000)))
     await site.start()
-    
-    # Запускаем бота и напоминания
+
+async def main():
     asyncio.create_task(daily_reminder())
-    asyncio.create_task(dp.start_polling(bot))
-    
-    # Держим main живым
-    while True:
-        await asyncio.sleep(3600)
+    await start_web_server()
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
