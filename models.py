@@ -1,6 +1,6 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, BigInteger, func
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, BigInteger
 from sqlalchemy.orm import declarative_base, sessionmaker
-from datetime import datetime, timedelta
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -23,6 +23,11 @@ class Card(Base):
     ease_factor = Column(Float, default=2.5)
     due_date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="new")
+    last_score = Column(Integer, nullable=True)
+    fail_count = Column(Integer, default=0)
+    mnemonic = Column(Text, nullable=True)
+    connections = Column(Text, nullable=True)
+    case_text = Column(Text, nullable=True)
 
 engine = create_engine("sqlite:///exam_bot.db")
 Base.metadata.create_all(engine)
