@@ -121,9 +121,11 @@ async def check_with_gpt(question: str, reference: str, student_answer: str, att
 {student_answer}
 
 ПРАВИЛА:
-1. Если 1-я или 2-я попытка И оценка < 7 — задай 1-2 КОРОТКИХ наводящих вопроса. Вердикт: "Нужно уточнить".
-2. Если 3-я попытка ИЛИ оценка >= 7 — дай ФИНАЛЬНУЮ оценку с советом "как ответить на экзамене".
-3. Не задавай вопросы, если ответ уже >= 7 баллов.
+1. Если 1-я или 2-я попытка И оценка < 8 — задай 1-2 КОРОТКИХ наводящих вопроса. Вердикт: "Нужно уточнить".
+2. Если 3-я попытка ИЛИ оценка >= 8 — дай ФИНАЛЬНУЮ оценку с советом "как ответить на экзамене".
+3. Не задавай вопросы, если ответ уже >= 8 баллов.
+4. Если это ФИНАЛЬНАЯ оценка — в поле full_answer дай ПОЛНЫЙ, РАЗВЁРНУТЫЙ, СТРУКТУРИРОВАННЫЙ ответ на вопрос билета так, как студент должен ответить на экзамене: вступление, основная часть с пунктами, заключение, примеры. Не сокращай.
+
 
 Ответь СТРОГО в JSON:
 {{
@@ -132,7 +134,8 @@ async def check_with_gpt(question: str, reference: str, student_answer: str, att
   "clarifying_questions": [],
   "missing": ["пункт 1"],
   "mistakes": ["ошибка 1"],
-  "advice": "совет по экзамену"
+  "advice": "краткий совет",
+  "full_answer": "Полный развернутый ответ на экзамен: ..."
 }}"""
     try:
         response = await client.chat.completions.create(
@@ -477,15 +480,29 @@ async def process_answer(message: types.Message, answer_text: str):
         session.close()
         return
     
-    emoji = {"Ю а он файр": "✅", "Соу соу": "⚠️", "Ю ар Штюпид": "❌"}.get(result['verdict'], "📝")
+    # Проверяем, есть ли уже сохранённый full_answer в базе
+    saved_full = card.full_answer
+    
+    # Если GPT вернул full_answer и в базе ещё нет — сохраняем
+    if result.get("full_answer") and not saved_full:
+        card.full_answer = result["full_answer"]
+        session.commit()
+        saved_full = result["full_answer"]
+
+    emoji = {"Ю ар он фаер": "✅", "Соу Соу": "⚠️", "Ю ар Штюпид": "❌"}.get(result['verdict'], "📝")
     text = f"{emoji} *Финальная оценка: {score}/10*\n⚖️ *Вердикт:* {result['verdict']}\n\n"
     
     if result.get("missing"):
         text += "❗ *Что стоит добавить:*\n" + "\n".join(f"• {m}" for m in result["missing"]) + "\n\n"
     if result.get("mistakes"):
         text += "❌ *Ошибки:*\n" + "\n".join(f"• {m}" for m in result["mistakes"]) + "\n\n"
+    
+    # Показываем эталонный ответ из базы (или только что сохранённый)
+    if saved_full:
+        text += f"📋 *Эталонный ответ из базы:*\n_{saved_full}_\n\n"
+    
     if result.get("advice"):
-        text += f"💡 *Как ответить на экзамене:*\n_{result['advice']}_\n\n"
+        text += f"💡 *Совет:* {result['advice']}\n\n"
     
     text += "Как оценишь сложность ответа?"
     
