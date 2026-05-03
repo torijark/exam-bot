@@ -366,7 +366,7 @@ async def start_test(message: types.Message):
 
 @dp.message(F.text == "💡 Материалы")
 async def materials_cmd(message: types.Message):
-    await message.answer("💡 *Дополнительные материалы*\n\nВыбери:", parse_mode="Markdown", reply_markup=materials_menu())
+    await message.answer("💡 *Дополнительные материалы*\n\nТкни на кпопку:", parse_mode="Markdown", reply_markup=materials_menu())
     state = user_states.get(message.from_user.id, {})
     user_states[message.from_user.id] = {"awaiting": "materials", "last_card_id": state.get("last_card_id")}
 
