@@ -24,7 +24,7 @@ def main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📝 Новый билет"), KeyboardButton(text="📋 Выбрать билет"), KeyboardButton(text="🔁 Повторение")],
-            [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🎯 Тест"), KeyboardButton(text="💡 Материалы")]
+            [KeyboardButton(text="📊 Статы"), KeyboardButton(text="🎯 Тест"), KeyboardButton(text="💡 Материалы")]
         ],
         resize_keyboard=True
     )
@@ -32,8 +32,8 @@ def main_menu():
 def anki_buttons():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="❌ Снова"), KeyboardButton(text="😐 Трудно")],
-            [KeyboardButton(text="✅ Хорошо"), KeyboardButton(text="🚀 Легко")]
+            [KeyboardButton(text="❌ Уууу"), KeyboardButton(text="😐 Ну такое")],
+            [KeyboardButton(text="✅ Намана"), KeyboardButton(text="🚀 Изи")]
         ],
         resize_keyboard=True
     )
@@ -209,22 +209,22 @@ async def cmd_start(message: types.Message):
             session.add(card)
         session.commit()
         await message.answer(
-            "👋 Привет! Я твой экзаменационный бот.\n\n"
-            "🎙️ Отвечай голосом или текстом — я всё проверю.\n"
-            "📚 Если ответ неполный, я задам наводящие вопросы.\n"
-            "💡 Можешь выбрать билет сама, посмотреть мнемоники, связи и кейсы.\n"
-            "🎯 Есть тест A/B/C/D для быстрой проверки.\n\n"
+            "⚔️ Да пребудет с тобой Сила, юный падаван!\n\n"
+            "🎙️ Отвечай голосом или текстом\n"
+            "📚 Если ответ неполный, я задам больше вопросов.\n"
+            "💡 Можешь выбрать билет, посмотреть мнемоники, связи и кейсы.\n"
+            "🎯 Есть тест для быстрой проверки твоей Силы.\n\n"
             "Выбери действие 👇",
             reply_markup=main_menu()
         )
     else:
-        await message.answer("С возвращением! Готов к экзамену? 💪", reply_markup=main_menu())
+        await message.answer("С возвращением, о юный падаван! Готов к битве? 💪", reply_markup=main_menu())
     session.close()
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message):
     user_states.pop(message.from_user.id, None)
-    await message.answer("❌ Отменено.", reply_markup=main_menu())
+    await message.answer("❌ Галя, отмена.", reply_markup=main_menu())
 
 @dp.message(F.text == "📝 Новый билет")
 async def new_question(message: types.Message):
@@ -276,7 +276,7 @@ async def review_mode(message: types.Message):
     
     if problem_card:
         card = problem_card
-        prefix = "🔥 *Проблемный билет!*\n"
+        prefix = "🔥 *Нот симпли лавли эт олл!*\n"
     else:
         card = session.query(Card).filter(
             Card.user_id == user.id,
@@ -287,7 +287,7 @@ async def review_mode(message: types.Message):
     
     if not card:
         new_count = session.query(Card).filter(Card.user_id == user.id, Card.status == "new").count()
-        msg = "🎉 На сегодня повторений нет!" + (f"\nОсталось {new_count} новых — жми 📝 Новый билет!" if new_count else "")
+        msg = " Свободен, уходи!" + (f"\nОсталось {new_count} новых — жми 📝 Новый билет!" if new_count else "")
         await message.answer(msg, reply_markup=main_menu())
         session.close()
         return
@@ -302,7 +302,7 @@ async def review_mode(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
     session.close()
 
-@dp.message(F.text == "📊 Статистика")
+@dp.message(F.text == "📊 Статы")
 async def show_stats(message: types.Message):
     session = Session()
     user = session.query(User).filter_by(telegram_id=message.from_user.id).first()
@@ -323,7 +323,7 @@ async def show_stats(message: types.Message):
         if c.fail_count >= 2 or (c.last_score is not None and c.last_score < 5):
             cats[c.category]["fail"] += 1
     
-    text = f"📊 *Твоя статистика*\n\nВсего: {total} | 🆕 {new} | 🔁 {review} | ⏰ {due}\n\n"
+    text = f"📊 *Твои статы*\n\nВсего: {total} | 🆕 {new} | 🔁 {review} | ⏰ {due}\n\n"
     
     text += "*📉 Слепые зоны (средний балл):*\n"
     for cat, data in cats.items():
@@ -347,7 +347,7 @@ async def show_stats(message: types.Message):
     
     problems = [c for c in cards if c.fail_count >= 2 or (c.last_score is not None and c.last_score < 5)]
     if problems:
-        text += "\n*🔥 Требуют внимания:*\n"
+        text += "\n*🔥 Учи лучше:*\n"
         for c in problems[:5]:
             text += f"Билет #{c.id} ({c.category}) — {c.last_score or '?'}/10, ошибок: {c.fail_count}\n"
     
@@ -390,10 +390,10 @@ async def handle_test_answer(message: types.Message):
     
     answer_idx = "ABCD".index(message.text)
     if answer_idx == test["correct"]:
-        text = f"✅ *Верно!*\n\n{test['explanation']}"
+        text = f"✅ *Smooth Operator!*\n\n{test['explanation']}"
     else:
         correct_letter = "ABCD"[test["correct"]]
-        text = f"❌ *Неверно.* Правильный ответ: *{correct_letter}*\n\n{test['explanation']}"
+        text = f"❌ *No No Mr Fish.* Правильный ответ: *{correct_letter}*\n\n{test['explanation']}"
     
     await message.answer(text, parse_mode="Markdown")
     await message.answer("Ещё тест или в меню?", reply_markup=main_menu())
@@ -477,7 +477,7 @@ async def process_answer(message: types.Message, answer_text: str):
         session.close()
         return
     
-    emoji = {"Зачтено": "✅", "Частично": "⚠️", "Незачтено": "❌"}.get(result['verdict'], "📝")
+    emoji = {"Ю а он файр": "✅", "Соу соу": "⚠️", "Ю ар Штюпид": "❌"}.get(result['verdict'], "📝")
     text = f"{emoji} *Финальная оценка: {score}/10*\n⚖️ *Вердикт:* {result['verdict']}\n\n"
     
     if result.get("missing"):
@@ -511,7 +511,7 @@ async def handle_voice_answer(message: types.Message):
         await message.answer("❌ Не удалось получить аудио.")
         return
     
-    msg = await message.answer("🎙️ Распознаю голос...")
+    msg = await message.answer("🎙️ А хто это у нас...")
     try:
         file = await bot.get_file(voice.file_id)
         file_path = f"voice_{user_id}_{voice.file_id}.ogg"
@@ -520,20 +520,20 @@ async def handle_voice_answer(message: types.Message):
         transcript = await transcribe_voice(file_path)
         os.remove(file_path)
         
-        await msg.edit_text(f"📝 *Распознано:*\n_{transcript}_", parse_mode="Markdown")
+        await msg.edit_text(f"📝 *Кусь за бочок:*\n_{transcript}_", parse_mode="Markdown")
         await process_answer(message, transcript)
     except Exception as e:
         await msg.edit_text(f"❌ Ошибка: {e}\nПопробуй текстом.")
         if os.path.exists(file_path):
             os.remove(file_path)
 
-@dp.message(F.text.in_(["❌ Снова", "😐 Трудно", "✅ Хорошо", "🚀 Легко"]))
+@dp.message(F.text.in_(["❌ Уууу", "😐 Ну такое", "✅ Намана", "🚀 Изи"]))
 async def handle_anki(message: types.Message):
     user_id = message.from_user.id
     if user_id not in user_states or user_states[user_id].get("awaiting") != "anki_rating":
         return
     
-    mapping = {"❌ Снова": "again", "😐 Трудно": "hard", "✅ Хорошо": "good", "🚀 Легко": "easy"}
+    mapping = {"❌ Уууу": "again", "😐 Ну такое": "hard", "✅ Намана": "good", "🚀 Изи": "easy"}
     quality = mapping[message.text]
     
     session = Session()
@@ -621,7 +621,7 @@ async def daily_reminder():
                 try:
                     await bot.send_message(
                         user.telegram_id,
-                        f"☀️ Доброе утро!\n\n📚 *{due_count}* билетов на повторение.\n🆕 *{new_count}* новых билетов.\n\nЖми 🔁 Повторение!",
+                        f"☀️ Проснулись-улыбнулись!\n\n📚 *{due_count}* билетов на повторение.\n🆕 *{new_count}* новых билетов.\n\nЖми 🔁 Повторение!",
                         parse_mode="Markdown"
                     )
                 except Exception:
