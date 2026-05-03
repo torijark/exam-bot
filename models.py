@@ -28,7 +28,6 @@ class Card(Base):
     mnemonic = Column(Text, nullable=True)
     connections = Column(Text, nullable=True)
     case_text = Column(Text, nullable=True)
+    full_answer = Column(Text, nullable=True)  # ← сохранённый развёрнутый ответ
 
-engine = create_engine("sqlite:///exam_bot.db")
-Base.metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
+engine = create_engine("sqlite:///exam_bot.db
